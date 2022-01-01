@@ -9,21 +9,32 @@ IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
 
 
-class CenterCrop:
-    def __init__(self, crop_size=224):
-        self.crop_size = crop_size
+class FitToFixSize:
+    def __init__(self, target_size=(224, 224)):
+        self.target_size = target_size
 
     def __call__(self, pil_img: Image, target):
         height, width = pil_img.height, pil_img.width
-        assert height >= self.crop_size and width >= self.crop_size,\
-            'crop size, {}, must less than image size, {}, {}'.format(self.crop_size, height, width)
-        x0 = (width - self.crop_size) // 2
-        y0 = (height - self.crop_size) // 2
-        x1 = x0 + self.crop_size
-        y1 = y0 + self.crop_size
-        pil_img = pil_img.crop((x0, y0, x1, y1))
+        if height < self.target_size[0] or width < self.target_size[0]:
+            width, height = pil_img.size
 
-        return pil_img, target
+            img_scale_y = self.target_size[0] / height
+            img_scale_x = self.target_size[1] / width
+            img_scale = min(img_scale_y, img_scale_x)
+            scaled_h = int(height * img_scale)
+            scaled_w = int(width * img_scale)
+
+            new_img = Image.new("RGB", (self.target_size[1], self.target_size[0]), color=(0, 0, 0))
+            img = pil_img.resize((scaled_w, scaled_h), Image.BILINEAR)
+            new_img.paste(img)
+        else:
+            y0 = (height - self.target_size[0]) // 2
+            x0 = (width - self.target_size[1]) // 2
+            y1 = y0 + self.target_size[0]
+            x1 = x0 + self.target_size[1]
+            new_img = pil_img.crop((x0, y0, x1, y1))
+
+        return new_img, target
 
 
 class ImageToNumpy:
@@ -97,7 +108,7 @@ class ImageNet2012(Dataset):
             self._transform = transform
         else:
             self._transform = Compose([
-                CenterCrop(crop_size=224),
+                FitToFixSize(target_size=(224, 224)),
                 ImageToNumpy(),
                 Normalize(),
             ])
