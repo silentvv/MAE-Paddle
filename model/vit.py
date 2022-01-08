@@ -102,17 +102,25 @@ class TransformerBackbone(nn.Layer):
 
 
 class ViT(nn.Layer):
-    def __init__(self, name, input_size=224, patch_size=14):
+    def __init__(self, mae, input_size=224, patch_size=14, num_classes=1000, train_backbone=False):
         super(ViT, self).__init__()
-        self.transformer_backbone = create_vision_transformer(name)
+        self.transformer_backbone = mae.encoder
+        if not train_backbone:
+            self.freeze_backbone()
 
         self.hidden_size = self.transformer_backbone.emdedding_dim
         patch_num = (input_size // patch_size)**2
         embedding_num = patch_num + 1  # cls token
 
-        self.patch_embedding = PatchEmbedding(in_channels=3, patch_size=patch_size, hidden_size=self.hidden_size)
-        self.cls_token = create_parameter([1, 1, self.hidden_size], dtype='float32')
+        self.patch_embedding = mae.patch_embedding
+        self.cls_token = mae.cls_token
         self.pos_embedding = create_parameter([1, embedding_num, self.hidden_size], dtype='float32')
+        self.classifier = nn.Linear(self.hidden_size, num_classes)
+        self.softmax = nn.Softmax()
+
+    def freeze_backbone(self):
+        for opr in self.transformer_backbone:
+            opr.stop_gradient = True
 
     def forward(self, x):
         x = self.patch_embedding(x)
@@ -123,7 +131,11 @@ class ViT(nn.Layer):
         x = x + self.pos_embedding
         x = self.transformer_backbone(x)
 
-        return x
+        x = x[:, 0]
+        logits = self.classifier(x)
+        pred = self.softmax(logits)
+
+        return logits, pred
 
 
 vit_config = {
@@ -152,18 +164,3 @@ def create_vision_transformer(backbone):
     args = vit_config.get(backbone, None)
     assert args is not None, 'invalid backbone name: {}'.format(backbone)
     return TransformerBackbone(**args)
-
-
-if __name__ == '__main__':
-    vit = ViT('ViT-B', input_size=224, patch_size=14)
-    img = paddle.rand([1, 3, 224, 224], dtype='float32')
-    flops = paddle.flops(vit, input_size=[1, 3, 224, 224])
-    print(f'flops: {flops/2**20}M')
-    state_dict = vit.state_dict()
-    param = 0
-    for k, v in state_dict.items():
-        param += v.size
-        # print(k, v.shape, v.size)
-    print(f'prams {param/2**20:.0f}M')
-    # out = vit(img)
-    # print(out.shape)
